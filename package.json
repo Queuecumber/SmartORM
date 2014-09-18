@@ -1,9 +1,11 @@
 {
-  "name": "SmartOrm",
+  "name": "smartorm",
   "description": "Intelligent multi-database object relational mapping",
   "private": true,
+  "main": "smart.js",
   "dependencies": {
-      "mysql": "~2.5.0",
-      "graphlib": "Queuecumber/GraphLibJS.git"
+    "mysql": "~2.5.0",
+    "graphlib": "Queuecumber/GraphLibJS.git",
+    "promise": "~6.0.0"
   }
 }

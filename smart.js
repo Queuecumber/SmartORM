@@ -12,7 +12,7 @@ module.exports = {
 
         var p = new Promise(function (fulfill, reject)
         {
-            connector.establish(params, function (err)
+            connector.establish(params, function (err, modeler)
             {
                 if(err)
                 {
@@ -20,7 +20,7 @@ module.exports = {
                 }
                 else
                 {
-                    connector.buildModel(function (err, model)
+                    modeler.buildModel(function (err, model)
                     {
                         if(err)
                         {

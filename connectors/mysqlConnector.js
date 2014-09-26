@@ -2,6 +2,12 @@ var mysql = require('mysql');
 var extend = require('xtend');
 var graphlib = require('graphlib');
 
+var tableRelationships = {
+    manyToOne: 'ManyToOne',
+    oneToMany: 'OneToMany',
+    manyToMany: 'ManyToMany'
+};
+
 var types = {
     boolean: 'Boolean',
     number: 'Number',
@@ -121,27 +127,79 @@ MysqlModeler.prototype.buildModel = function (callback)
     {
         var tablesNodes = rows
                             .map(function (r) { return r[Object.keys(r)[0]]; })
-                            .map(function (tn) { return new graphLib.Node(tn, [])});
+                            .map(function (tn) { return new graphLib.Node(tn)});
 
-        tableNodes.forEach(function (tn)
+        model.tables.nodes = tableNodes;
+
+        // Build a graph of the tables and their relationships
+        model.tables.nodes.forEach(function (tn)
         {
             // Figure out columns in each row (both name and type of column)
             this.context.query('show columns from ?', [tn.id], function (err, rows)
             {
                 var tableFields = rows
-                                    .filter(function (r) { return r.Key !== 'PRI' && r.Key !== 'MUL'; })
                                     .map(function (r)
                                     {
-                                        var fieldSpec = {};
-                                        fieldSpec.name = r.Field;
-                                        fieldSpec.type = getTypeOfField(r.Type);
+                                        var fieldSpec = {
+                                            name: r.Field,
+                                            type: getTypeOfField(r.Type)
+                                        };
 
                                         return fieldSpec;
                                     });
 
-                tn.data.concat(tableFields);
+                tn.fields = tableFields;
 
-                // TODO Figure out table relations
+                // Figure out table relations
+                this.context.query('show create table ?', [tn.id], function (err, rows)
+                {
+                    // Figure out primary keys
+                    // TODO support multiple column keys
+                    var createText = rows['Create Table'];
+
+                    var primaryKeyMatcher = /PRIMARY KEY \(`(.*)`\)/g;
+                    var keys = [];
+
+                    while(var result = primaryKeyMatcher.exec(createText))
+                        keys.push(result[1]);
+
+                    tn.keys = keys;
+
+                    // Figure out foreign keys and added appropriate edges
+                    var foreignKeyMatcher = /CONSTRAINT `.*` FOREIGN KEY \(`(.*)`\) REFERENCES `(.*)` \(`(.*)`\)/g;
+
+                    while(var result = foreignKeyMatch.exec(createText))
+                    {
+                        var otherTable = model.tables.node(result[2]);
+
+                        var ourRelation = {
+                            table: otherTable,
+                            how: {
+                                ours: tn.fields.find(function (f) { return f.name === result[1]; }),
+                                theirs: otherTable.fields.find(function (f) { return f.name === result[3] })
+                            },
+                            direction: tableRelationships.manyToOne
+                        };
+
+                        var theirRelation = {
+                            table: tn,
+                            how: {
+                                ours: ourRelation.how.theirs,
+                                theirs: ourRelation.how.ours
+                            },
+                            direction: tableRelationships.oneToMany
+                        };
+
+                        var ourEdge = new graphLib.Edge(otherTable, 1);
+                        ourEdge.relation = ourRelation;
+
+                        var theirEdge = new graphLib.Edge(tn, 1);
+                        theirEdge.relation = theirRelation;
+
+                        tn.edges.push(ourEdge);
+                        otherTable.edges.push(theirEdge);
+                    }
+                });
             });
         });
     });

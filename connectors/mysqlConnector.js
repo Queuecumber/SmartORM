@@ -1,6 +1,7 @@
 var mysql = require('mysql');
 var extend = require('xtend');
 var graphlib = require('graphlib');
+var Promise = require('promise').Promise;
 
 var tableRelationships = {
     manyToOne: 'ManyToOne',
@@ -16,7 +17,26 @@ var types = {
     datetime: 'DateTime'
 };
 
-function getTypeOfField(typeName)
+function MysqlModel(pool)
+{
+    this.tables = new graphlib.Graph();
+}
+
+var defParams = {
+    host: 'localhost',
+    port: '3306',
+    user: '',
+    password: '',
+    database: '',
+    pool: true
+};
+
+function MysqlModeler(params)
+{
+    this.params = extend({}, defParams, params);
+}
+
+MysqlModeler.prototype.getTypeOfField = function (typeName)
 {
     typeName = typeName.toLower();
 
@@ -61,26 +81,7 @@ function getTypeOfField(typeName)
     {
         return types.datetime;
     }
-}
-
-function MysqlModel(pool)
-{
-    this.tables = new graphlib.Graph();
-}
-
-var defParams = {
-    host: 'localhost',
-    port: '3306',
-    user: '',
-    password: '',
-    database: '',
-    pool: true
 };
-
-function MysqlModeler(params)
-{
-    this.params = extend({}, defParams, params);
-}
 
 MysqlModeler.prototype.connect = function (callback)
 {
@@ -118,91 +119,131 @@ MysqlModeler.prototype.connect = function (callback)
     }
 };
 
+MysqlModeler.prototype.modelTablesAsNodes = function ()
+{
+    return new Promise(function (fulfill, reject)
+    {
+        // Figure out tables and make nodes for them
+        this.context.query('show tables from ?', [this.params.database], function(err, rows, fields)
+        {
+            if(err) return reject(err);
+
+            var tablesNodes = rows
+                                .map(function (r) { return r[fields[0].name]; })
+                                .map(function (tn) { return new graphLib.Node(tn)});
+
+            fulfill(tableNodes);
+        });
+    }.bind(this));
+};
+
+MysqlModeler.prototype.modelColumnsAsFields = function (tn)
+{
+    return new Promise(function (fulfill, reject)
+    {
+        // Figure out columns in each row (both name and type of column)
+        this.context.query('show columns from ?', [tn.id], function (err, rows)
+        {
+            if(err) return reject(err);
+
+            var tableFields = rows
+                                .map(function (r)
+                                {
+                                    var fieldSpec = {
+                                        name: r.Field,
+                                        type: this.getTypeOfField(r.Type)
+                                    };
+
+                                    return fieldSpec;
+                                }, this);
+
+            tn.fields = tableFields;
+
+            fulfill(tn);
+        });
+    }.bind(this));
+};
+
+MysqlModeler.prototype.modelRelationsAsEdges = function (tn)
+{
+    return new Promise(function (fulfill, reject)
+    {
+        // Figure out table relations
+        this.context.query('show create table ?', [tn.id], function (err, rows)
+        {
+            if(err) return reject(err);
+
+            // Figure out primary keys
+            // TODO support multiple column keys
+            var createText = rows['Create Table'];
+
+            var primaryKeyMatcher = /PRIMARY KEY \(`(.*)`\)/g;
+            var keys = [];
+
+            while(var result = primaryKeyMatcher.exec(createText))
+                keys.push(result[1]);
+
+            tn.keys = keys;
+
+            // Figure out foreign keys and added appropriate edges
+            var foreignKeyMatcher = /CONSTRAINT `.*` FOREIGN KEY \(`(.*)`\) REFERENCES `(.*)` \(`(.*)`\)/g;
+
+            while(var result = foreignKeyMatch.exec(createText))
+            {
+                var otherTable = model.tables.node(result[2]);
+
+                var ourRelation = {
+                    table: otherTable,
+                    how: {
+                        ours: tn.fields.find(function (f) { return f.name === result[1]; }),
+                        theirs: otherTable.fields.find(function (f) { return f.name === result[3] })
+                    },
+                    direction: tableRelationships.manyToOne
+                };
+
+                var theirRelation = {
+                    table: tn,
+                    how: {
+                        ours: ourRelation.how.theirs,
+                        theirs: ourRelation.how.ours
+                    },
+                    direction: tableRelationships.oneToMany
+                };
+
+                var ourEdge = new graphLib.Edge(otherTable, 1);
+                ourEdge.relation = ourRelation;
+
+                var theirEdge = new graphLib.Edge(tn, 1);
+                theirEdge.relation = theirRelation;
+
+                tn.edges.push(ourEdge);
+                otherTable.edges.push(theirEdge);
+            }
+
+            fulfill(tn);
+        });
+    }.bind(this));
+};
+
 MysqlModeler.prototype.buildModel = function (callback)
 {
-    var model = new MysqlModel();
-
-    // Figure out tables and make nodes for them
-    this.context.query('show tables from ?', [this.params.database], function(err, rows, fields)
-    {
-        var tablesNodes = rows
-                            .map(function (r) { return r[Object.keys(r)[0]]; })
-                            .map(function (tn) { return new graphLib.Node(tn)});
-
-        model.tables.nodes = tableNodes;
-
-        // Build a graph of the tables and their relationships
-        model.tables.nodes.forEach(function (tn)
+    var chain = this.modelTablesAsNodes()
+        .then(function (tableNodes)
         {
-            // Figure out columns in each row (both name and type of column)
-            this.context.query('show columns from ?', [tn.id], function (err, rows)
-            {
-                var tableFields = rows
-                                    .map(function (r)
-                                    {
-                                        var fieldSpec = {
-                                            name: r.Field,
-                                            type: getTypeOfField(r.Type)
-                                        };
-
-                                        return fieldSpec;
-                                    });
-
-                tn.fields = tableFields;
-
-                // Figure out table relations
-                this.context.query('show create table ?', [tn.id], function (err, rows)
-                {
-                    // Figure out primary keys
-                    // TODO support multiple column keys
-                    var createText = rows['Create Table'];
-
-                    var primaryKeyMatcher = /PRIMARY KEY \(`(.*)`\)/g;
-                    var keys = [];
-
-                    while(var result = primaryKeyMatcher.exec(createText))
-                        keys.push(result[1]);
-
-                    tn.keys = keys;
-
-                    // Figure out foreign keys and added appropriate edges
-                    var foreignKeyMatcher = /CONSTRAINT `.*` FOREIGN KEY \(`(.*)`\) REFERENCES `(.*)` \(`(.*)`\)/g;
-
-                    while(var result = foreignKeyMatch.exec(createText))
-                    {
-                        var otherTable = model.tables.node(result[2]);
-
-                        var ourRelation = {
-                            table: otherTable,
-                            how: {
-                                ours: tn.fields.find(function (f) { return f.name === result[1]; }),
-                                theirs: otherTable.fields.find(function (f) { return f.name === result[3] })
-                            },
-                            direction: tableRelationships.manyToOne
-                        };
-
-                        var theirRelation = {
-                            table: tn,
-                            how: {
-                                ours: ourRelation.how.theirs,
-                                theirs: ourRelation.how.ours
-                            },
-                            direction: tableRelationships.oneToMany
-                        };
-
-                        var ourEdge = new graphLib.Edge(otherTable, 1);
-                        ourEdge.relation = ourRelation;
-
-                        var theirEdge = new graphLib.Edge(tn, 1);
-                        theirEdge.relation = theirRelation;
-
-                        tn.edges.push(ourEdge);
-                        otherTable.edges.push(theirEdge);
-                    }
-                });
-            });
+            return Promise.all(tableNodes.map(this.modelColumnsAsFields.bind(this)));
+        }.bind(this))
+        .then(function (tableNodes)
+        {
+            return Promise.all(tableNodes.map(this.modelRelationsAsEdges.bind(this)));
+        }.bind(this))
+        .then(function (tableNodes)
+        {
+            var model = new MysqlModel();
+            model.tables.nodes = tableNodes;
+            return Promise.resolve(model);
         });
-    });
+
+    return chain.nodeify(callback);
 };
 
 module.exports = {

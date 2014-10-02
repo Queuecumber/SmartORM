@@ -1,7 +1,7 @@
 var smart = require('./smart');
 
 smart.model(smart.connectors.mySql, {
-    database: 'forum',
+    schema: 'forum',
     user: 'mehrlich',
     password: ''
 }).then(function (model)

@@ -1,7 +1,7 @@
 var mysql = require('mysql');
 var extend = require('xtend');
 var graphlib = require('graphlib');
-var Promise = require('promise').Promise;
+var Promise = require('promise');
 
 var tableRelationships = {
     manyToOne: 'ManyToOne',

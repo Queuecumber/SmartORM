@@ -117,7 +117,7 @@ MysqlModeler.prototype.connect = function (callback)
             port: params.port,
             user: params.user,
             password: params.password,
-            database: params.database
+            database: params.schema
         });
 
         this.pool.getConnection(function (err, connection)
@@ -135,7 +135,7 @@ MysqlModeler.prototype.connect = function (callback)
             port: params.port,
             user: params.user,
             password: params.password,
-            database: params.database
+            database: params.schema
         });
 
         this.context.connect(function (err)
@@ -251,7 +251,7 @@ MysqlModeler.prototype.buildModel = function (callback)
         {
             var model = new MysqlModel();
             model.tables.nodes = tableNodes;
-            return Promise.resolve(model);
+            return model;
         })
         .nodeify(callback);
 };

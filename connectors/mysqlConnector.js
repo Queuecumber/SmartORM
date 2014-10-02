@@ -85,6 +85,31 @@ MysqlModeler.prototype.getTypeOfField = function (typeName)
 
 MysqlModeler.prototype.connect = function (callback)
 {
+    var pquery = function (stmnt, params)
+    {
+        return new Promise(function (fulfill, reject)
+        {
+            var qf = null;
+            if(params)
+                qf = this.query.bind(this, stmnt, params);
+            else
+                qf = this.query.bind(this, stmnt);
+
+
+            qf(function (err, rows, fields)
+            {
+                if(err)
+                {
+                    reject(err);
+                }
+                else
+                {
+                    fulfill(rows, fields);
+                }
+            });
+        }.bind(this));
+    };
+
     if(this.params.pool)
     {
         this.pool = mysql.createPool({
@@ -98,6 +123,7 @@ MysqlModeler.prototype.connect = function (callback)
         this.pool.getConnection(function (err, connection)
         {
             this.context = connection;
+            this.context.pquery = pquery.bind(this.context);
 
             callback(err);
         });
@@ -114,6 +140,8 @@ MysqlModeler.prototype.connect = function (callback)
 
         this.context.connect(function (err)
         {
+            this.context.pquery = pquery.bind(this.context);
+
             callback(err);
         });
     }
@@ -121,58 +149,42 @@ MysqlModeler.prototype.connect = function (callback)
 
 MysqlModeler.prototype.modelTablesAsNodes = function ()
 {
-    return new Promise(function (fulfill, reject)
-    {
-        // Figure out tables and make nodes for them
-        this.context.query('show tables from ?', [this.params.database], function(err, rows, fields)
+    // Figure out tables and make nodes for them
+    return this.context.pquery('show tables from ?', [this.params.database])
+        .then(function (rows, fields)
         {
-            if(err) return reject(err);
-
-            var tablesNodes = rows
-                                .map(function (r) { return r[fields[0].name]; })
-                                .map(function (tn) { return new graphLib.Node(tn)});
-
-            fulfill(tableNodes);
-        });
-    }.bind(this));
+            return rows
+                .map(function (r) { return r[fields[0].name]; })
+                .map(function (tn) { return new graphLib.Node(tn)});
+        }.bind(this));
 };
 
 MysqlModeler.prototype.modelColumnsAsFields = function (tn)
 {
-    return new Promise(function (fulfill, reject)
-    {
-        // Figure out columns in each row (both name and type of column)
-        this.context.query('show columns from ?', [tn.id], function (err, rows)
+    // Figure out columns in each row (both name and type of column)
+    return this.context.pquery('show columns from ?', [tn.id])
+        .then(function (rows)
         {
-            if(err) return reject(err);
+            tn.fields = rows.map(function (r)
+            {
+                var fieldSpec = {
+                    name: r.Field,
+                    type: this.getTypeOfField(r.Type)
+                };
 
-            var tableFields = rows
-                                .map(function (r)
-                                {
-                                    var fieldSpec = {
-                                        name: r.Field,
-                                        type: this.getTypeOfField(r.Type)
-                                    };
+                return fieldSpec;
+            }, this);
 
-                                    return fieldSpec;
-                                }, this);
-
-            tn.fields = tableFields;
-
-            fulfill(tn);
-        });
-    }.bind(this));
+            return tn;
+        }.bind(this));
 };
 
 MysqlModeler.prototype.modelRelationsAsEdges = function (tn)
 {
-    return new Promise(function (fulfill, reject)
-    {
-        // Figure out table relations
-        this.context.query('show create table ?', [tn.id], function (err, rows)
+    // Figure out table relations
+    return this.context.pquery('show create table ?', [tn.id])
+        .then(function (rows)
         {
-            if(err) return reject(err);
-
             // Figure out primary keys
             // TODO support multiple column keys
             var createText = rows['Create Table'];
@@ -220,14 +232,13 @@ MysqlModeler.prototype.modelRelationsAsEdges = function (tn)
                 otherTable.edges.push(theirEdge);
             }
 
-            fulfill(tn);
+            return tn;
         });
-    }.bind(this));
 };
 
 MysqlModeler.prototype.buildModel = function (callback)
 {
-    var chain = this.modelTablesAsNodes()
+    return this.modelTablesAsNodes()
         .then(function (tableNodes)
         {
             return Promise.all(tableNodes.map(this.modelColumnsAsFields.bind(this)));
@@ -241,9 +252,8 @@ MysqlModeler.prototype.buildModel = function (callback)
             var model = new MysqlModel();
             model.tables.nodes = tableNodes;
             return Promise.resolve(model);
-        });
-
-    return chain.nodeify(callback);
+        })
+        .nodeify(callback);
 };
 
 module.exports = {

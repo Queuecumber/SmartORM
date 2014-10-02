@@ -1,4 +1,4 @@
-var Promise = require('promise').Promise;
+var Promise = require('promise');
 
 module.exports = {
     // Available Connectors

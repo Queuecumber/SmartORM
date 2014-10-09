@@ -2,6 +2,7 @@ var mysql = require('mysql');
 var extend = require('xtend');
 var graphlib = require('graphlib');
 var Promise = require('promise');
+var MysqlModel = require('./mysqlModel');
 
 var tableRelationships = {
     manyToOne: 'ManyToOne',
@@ -16,11 +17,6 @@ var types = {
     binary: 'Binary',
     datetime: 'DateTime'
 };
-
-function MysqlModel(pool)
-{
-    this.tables = new graphlib.Graph();
-}
 
 var defParams = {
     host: 'localhost',
@@ -249,10 +245,9 @@ MysqlModeler.prototype.buildModel = function (callback)
         }.bind(this))
         .then(function (tableNodes)
         {
-            var model = new MysqlModel();
-            model.tables.nodes = tableNodes;
+            var model = new MysqlModel(this.context, tableNodes);
             return model;
-        })
+        }.bind(this))
         .nodeify(callback);
 };
 

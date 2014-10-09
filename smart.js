@@ -3,7 +3,7 @@ var Promise = require('promise');
 module.exports = {
     // Available Connectors
     connectors: {
-        mySql: 'connectors/mysqlConnector'
+        mysql: 'connectors/mysqlConnector'
     },
 
     model: function (connector, params, callback)

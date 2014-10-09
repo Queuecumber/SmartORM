@@ -1,6 +1,6 @@
 var smart = require('./smart');
 
-smart.model(smart.connectors.mySql, {
+smart.model(smart.connectors.mysql, {
     schema: 'forum',
     user: 'mehrlich',
     password: ''

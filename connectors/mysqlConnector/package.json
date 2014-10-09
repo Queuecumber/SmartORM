@@ -1,0 +1,4 @@
+{
+    "name": "mysqlConnector",
+    "main": "./mysqlModeler.js"
+}
